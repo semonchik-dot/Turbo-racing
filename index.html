@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Turbo Racing Ultimate</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101522;color:white;font-family:Arial;text-align:center}
+h1{color:#ffe45c;font-size:25px;margin:15px 0 8px}
+.panel{background:#202a3b;padding:12px;margin:10px;border-radius:14px}
+.row{display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+button,select{border:0;border-radius:10px;padding:12px 9px;font-weight:bold;font-size:14px;background:#35445d;color:white}
+button:active{transform:scale(.96)}
+.primary{background:#e7bd26;color:#171717}
+canvas{width:100%;max-width:400px;height:auto;display:block;margin:auto;border:3px solid #cbd5e1;border-radius:12px}
+.stats{display:flex;justify-content:space-around;gap:5px;font-weight:bold;font-size:14px;padding:10px}
+.hidden{display:none!important}
+#message{color:#ffe45c;min-height:20px;font-size:14px}
+.small{font-size:12px;color:#cbd5e1}
+</style>
+</head>
+<body>
+<h1>🏁 TURBO RACING ULTIMATE</h1>
+
+<<div class="stats">
+ <span>🏆 <b id="score">0</b></span>
+ <span>🪙 <b id="money">0</b></span>
+ <span>🚀 <b id="fuel">100</b>%</span>
+ <span>🏅 <b id="best">0</b></span>
+</div>
+
+<div class="panel" id="menu">
+ <h3>🚘 GARAJ VA XARITA</h3>
+ <p>Mashina tanla</p>
+ <div class="row" id="cars"></div>
+ <p>Xarita tanla</p>
+ <div class="row" id="maps">
+  <button data-map="city">🌆 Shahar</button>
+  <button data-map="desert">🏜️ Cho‘l</button>
+  <button data-map="mountain">🌲 Tog‘</button>
+ </div>
+ <p id="carInfo" class="small"></p>
+ <button class="primary" id="play">🏎️ POYGANI BOSHLASH</button>
+ <button id="shopBtn">🛒 DO‘KON</button>
+ <button id="soundBtn">🔊 OVOZ: YOQILGAN</button>
+</div>
+
+<canvas id="game" width="360" height="520"></canvas>
+
+<div class="panel hidden" id="controls">
+ <div class="row">
+  <button id="left">⬅️ CHAP</button>
+  <button id="nitro" style="background:#e65b16">🚀 NITRO</button>
+  <button id="right">O‘NG ➡️</button>
+ </div>
+ <p class="small">Yo‘ldagi tangalarni yig‘. Mashinalar va politsiyadan qoch!</p>
+</div>
+
+<div class="panel hidden" id="shop">
+ <h3>🛒 MASHINALAR DO‘KONI</h3>
+ <p id="shopInfo"></p>
+ <div id="shopItems" class="row"></div>
+ <button id="back">⬅️ ORQAGA</button>
+</div>
+
+<p id="message"></p>
+<p class="small">Turbo Racing Ultimate • HTML5</p>
+
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const c=$('game'),g=c.getContext('2d');
+const cars=[
+ {name:'Street',color:'#ef4444',price:0,speed:4},
+ {name:'Ocean',color:'#38bdf8',price:30,speed:4.3},
+ {name:'Gold',color:'#facc15',price:70,speed:4.6},
+ {name:'Neon',color:'#c084fc',price:120,speed:4.9},
+ {name:'Shadow',color:'#e5e7eb',price:200,speed:5.2}
+];
+const maps={
+ city:{name:'Shahar',grass:'#176044',road:'#414752',line:'#f8fafc'},
+ desert:{name:'Cho‘l',grass:'#b58b48',road:'#7c6956',line:'#fff0c2'},
+ mountain:{name:'Tog‘',grass:'#355747',road:'#58616a',line:'#e2e8f0'}
+};
+let owned=[0],selected=0,map='city',playing=false,score=0,money=0,best=0;
+let x=160,traffic=[],coins=[],frame=0,road=0,fuel=100,nitro=false,police={x:160,y:-180},sound=true,raf=0;
+let audio=null;
+try{
+ best=Number(localStorage.getItem('turbo_best')||0);
+ money=Number(localStorage.getItem('turbo_money')||0);
+ owned=JSON.parse(localStorage.getItem('turbo_owned')||'[0]');
+ selected=Number(localStorage.getItem('turbo_car')||0);
+ if(!owned.includes(0))owned.unshift(0);
+ if(!cars[selected]||!owned.includes(selected))selected=0;
+}catch(e){}
+function save(){
+ try{
+ localStorage.setItem('turbo_best',best);
+ localStorage.setItem('turbo_money',money);
+ localStorage.setItem('turbo_owned',JSON.stringify(owned));
+ localStorage.setItem('turbo_car',selected);
+ }catch(e){}
+}
+function beep(freq=500,duration=.08){
+ if(!sound)return;
+ try{
+  audio=audio||new(window.AudioContext||window.webkitAudioContext)();
+  if(audio.state==='suspended')audio.resume();
+  const o=audio.createOscillator(),v=audio.createGain();
+  o.frequency.value=freq;o.type='sine';
+  v.gain.value=.035;o.connect(v);v.connect(audio.destination);
+  o.start();v.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);
+  o.stop(audio.currentTime+duration);
+ }catch(e){}
+}
+function updateStats(){
+ $('score').textContent=score;
+ $('money').textContent=money;
+ $('best').textContent=best;
+}
+function renderCars(){
+ $('cars').innerHTML='';
+ cars.forEach((car,i)=>{
+  const b=document.createElement('button');
+  b.textContent=(owned.includes(i)?'✅ ':'🔒 ')+car.name+(i===selected?' ⭐':'');
+  b.style.border=i===selected?'2px solid #ffe45c':'2px solid transparent';
+  b.addEventListener('click',()=>{
+   if(owned.includes(i)){
+    selected=i;$('carInfo').textContent=car.name+' tanlandi!';
+    renderCars();draw();
+   }else $('carInfo').textContent=car.name+' do‘konda '+car.price+' tanga turadi.';
+  });
+  $('cars').appendChild(b);
+ });
+ $('carInfo').textContent='Tanlangan: '+cars[selected].name+' | Tezlik: '+cars[selected].speed;
+}
+$('maps').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+ map=b.dataset.map;
+ $('maps').querySelectorAll('button').forEach(a=>a.style.outline=a===b?'2px solid #ffe45c':'none');
+ draw();
+}));
+function car(px,py,color,policeCar=false){
+ g.fillStyle='#111827';g.fillRect(px-18,py+8,36,49);
+ g.fillStyle=color;g.fillRect(px-15,py,30,55);
+ g.fillStyle='#a5f3fc';g.fillRect(px-10,py+8,20,12);
+ g.fillStyle='#172033';g.fillRect(px-10,py+32,20,11);
+ g.fillStyle='#111';g.fillRect(px-19,py+9,5,12);g.fillRect(px+14,py+9,5,12);
+ g.fillRect(px-19,py+36,5,12);g.fillRect(px+14,py+36,5,12);
+ g.fillStyle='#fff7ad';g.fillRect(px-12,py+2,6,4);g.fillRect(px+6,py+2,6,4);
+ if(policeCar){
+  g.fillStyle='#2563eb';g.fillRect(px-14,py+20,28,10);
+  g.fillStyle='#ef4444';g.fillRect(px-11,py-3,10,5);
+  g.fillStyle='#60a5fa';g.fillRect(px+1,py-3,10,5);
+ }
+}
+function draw(){
+ const m=maps[map];
+ g.fillStyle=m.grass;g.fillRect(0,0,360,520);
+ if(map==='mountain'){
+  g.fillStyle='#64748b';
+  for(let i=0;i<8;i++){
+   let xx=(i*67+road*.2)%420-30;
+   g.beginPath();g.moveTo(xx,0);g.lineTo(xx+30,70);g.lineTo(xx-20,70);g.fill();
+  }
+ }
+ g.fillStyle=m.road;g.fillRect(20,0,320,520);
+ g.fillStyle=m.line;g.fillRect(23,0,4,520);g.fillRect(333,0,4,520);
+ for(let y=-40+(road%65);y<540;y+=65){
+  g.fillRect(125,y,4,35);g.fillRect(230,y,4,35);
+ }
+ coins.forEach(a=>{
+  g.fillStyle='#facc15';g.beginPath();g.arc(a.x,a.y,10,0,Math.PI*2);g.fill();
+  g.fillStyle='#854d0e';g.font='bold 12px Arial';g.fillText('$',a.x-4,a.y+4);
+ });
+ traffic.forEach(a=>car(a.x,a.y,a.color));
+ car(police.x,police.y,'#e5e7eb',true);
+ car(x,420,cars[selected].color);
+ if(nitro&&fuel>0){
+  g.fillStyle='#60a5fa';
+  g.beginPath();g.moveTo(x-10,473);g.lineTo(x-5,500+Math.random()*8);g.lineTo(x,473);g.fill();
+  g.beginPath();g.moveTo(x+4,473);g.lineTo(x+9,500+Math.random()*8);g.lineTo(x+13,473);g.fill();
+ }
+ if(!playing){
+  g.fillStyle='#000b';g.fillRect(35,200,290,90);
+  g.fillStyle='white';g.textAlign='center';g.font='bold 20px Arial';
+  g.fillText('🏁 TURBO RACING',180,237);
+  g.font='14px Arial';g.fillText('Boshlash tugmasini bos!',180,264);
+ }
+}
+function move(d){
+ if(!playing)return;
+ x=Math.max(45,Math.min(315,x+d*95));draw();
+}
+function end(){
+ playing=false;nitro=false;
+ best=Math.max(best,score);save();updateStats();
+ $('controls').classList.add('hidden');$('menu').classList.remove('hidden');
+ $('message').textContent='🏁 Poyga tugadi! Ochko: '+score+'. Yana urinib ko‘r!';
+ beep(180,.25);draw();
+}
+function loop(){
+ if(!playing)return;
+ frame++;
+ const speed=(nitro&&fuel>0?8:cars[selected].speed);
+ if(nitro&&fuel>0)fuel=Math.max(0,fuel-.55);
+ else fuel=Math.min(100,fuel+.08);
+ road+=speed;
+ if(frame%Math.max(25,Math.floor(52-selected*.5))===0)
+  traffic.push({x:[65,160,255][Math.floor(Math.random()*3)],y:-65,color:['#3182ce','#f97316','#a855f7','#eab308'][Math.floor(Math.random()*4)]});
+ if(frame%85===0)coins.push({x:[65,160,255][Math.floor(Math.random()*3)],y:-20});
+ traffic.forEach(a=>a.y+=speed);
+ coins.forEach(a=>a.y+=speed);
+ if(frame%8===0){score++;updateStats()}
+ coins=coins.filter(a=>{
+  if(Math.abs(a.x-x)<28&&Math.abs(a.y-440)<35){
+   money++;updateStats();save();beep(850);return false;
+  }
+  return a.y<560;
+ });
+ if(traffic.some(a=>Math.abs(a.x-x)<29&&a.y+50>420&&a.y<475)){
+  end();return;
+ }
+ traffic=traffic.filter(a=>a.y<560);
+ if(frame%240===0)police.y=-80;
+ if(police.y<360)police.y+=1.2;
+ if(police.y>365&&Math.abs(police.x-x)<24&&Math.abs(police.y-420)<45){
+  end();return;
+ }
+ $('fuel').textContent=Math.floor(fuel);
+ draw();raf=requestAnimationFrame(loop);
+}
+function start(){
+ cancelAnimationFrame(raf);
+ score=0;x=160;traffic=[];coins=[];frame=0;road=0;fuel=100;
+ police={x:160,y:-180};nitro=false;playing=true;
+ $('menu').classList.add('hidden');$('shop').classList.add('hidden');
+ $('controls').classList.remove('hidden');$('message').textContent='';
+ updateStats();draw();raf=requestAnimationFrame(loop);
+}
+function openShop(){
+ $('menu').classList.add('hidden');$('shop').classList.remove('hidden');
+ $('shopInfo').textContent='Senda '+money+' ta tanga bor.';
+ $('shopItems').innerHTML='';
+ cars.forEach((car,i)=>{
+  const b=document.createElement('button');
+  b.textContent=owned.includes(i)?(selected===i?'⭐ Tanlangan':'🚘 Tanlash'):car.name+' — 🪙 '+car.price;
+  b.addEventListener('click',()=>{
+   if(owned.includes(i)){selected=i;save();renderCars();openShop();beep(600);return}
+   if(money<car.price){$('shopInfo').textContent='Tanga yetarli emas! Poyga o‘ynab tanga yig‘.';return}
+   money-=car.price;owned.push(i);selected=i;save();updateStats();renderCars();openShop();beep(850);
+  });
+  $('shopItems').appendChild(b);
+ });
+}
+$('play').addEventListener('click',start);
+$('shopBtn').addEventListener('click',openShop);
+$('back').addEventListener('click',()=>{
+ $('shop').classList.add('hidden');$('menu').classList.remove('hidden');renderCars();draw();
+});
+$('left').addEventListener('click',()=>move(-1));
+$('right').addEventListener('click',()=>move(1));
+$('nitro').addEventListener('pointerdown',()=>{nitro=true});
+['pointerup','pointerleave','pointercancel'].forEach(e=>$('nitro').addEventListener(e,()=>nitro=false));
+$('soundBtn').addEventListener('click',()=>{
+ sound=!sound;$('soundBtn').textContent=sound?'🔊 OVOZ: YOQILGAN':'🔇 OVOZ: O‘CHIQ';
+ if(sound)beep();
+});
+document.addEventListener('keydown',e=>{
+ if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')move(-1);
+ if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')move(1);
+ if(e.code==='Space')nitro=true;
+});
+document.addEventListener('keyup',e=>{if(e.code==='Space')nitro=false});
+renderCars();updateStats();draw();
+})();
+</script>
+</body>
+</html>
